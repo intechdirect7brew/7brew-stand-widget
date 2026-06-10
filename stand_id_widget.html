@@ -77,7 +77,7 @@
 <script>
   // ── Configuration ────────────────────────────────────────────────────
   // Replace this URL with your deployed Cloud Function URL after deployment
-  const CLOUD_FUNCTION_URL = "https://stand-id-lookup-695671942214.us-central1.run.app/lookup";
+  const CLOUD_FUNCTION_URL = "REPLACE_WITH_YOUR_CLOUD_FUNCTION_URL";
 
   // JotForm internal field IDs (the number after "input_")
   const FIELD_STAND_ID   = "53";
@@ -122,16 +122,16 @@
     if (state) input.classList.add(state);
   }
 
-  // Populate a JotForm field by its input_ number
+  // Populate a JotForm field using postMessage API (avoids cross-origin block)
   function fillField(fieldId, value) {
-    // Try direct DOM manipulation first (works for simple text inputs)
-    const el = window.parent.document.getElementById("input_" + fieldId);
-    if (el) {
-      el.value = value;
-      // Trigger change event so JotForm registers the new value
-      el.dispatchEvent(new Event("input",  { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-    }
+    window.parent.postMessage(
+      JSON.stringify({
+        action:  "setFieldValue",
+        fieldID: fieldId,
+        value:   value
+      }),
+      "*"
+    );
   }
 
   function clearFields() {
