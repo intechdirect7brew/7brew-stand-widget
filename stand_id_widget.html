@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>7-Brew Stand ID Lookup</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      background: transparent;
+      padding: 4px 0;
+    }
+
+    .lookup-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    #stand-input {
+      flex: 1;
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid #b8b8b8;
+      border-radius: 3px;
+      font-size: 14px;
+      font-family: Arial, sans-serif;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #stand-input:focus { border-color: #0075e2; }
+    #stand-input.is-valid   { border-color: #2e7d32; background: #f6fff6; }
+    #stand-input.is-invalid { border-color: #c62828; background: #fff6f6; }
+
+    #lookup-btn {
+      height: 36px;
+      padding: 0 16px;
+      background: #0a1f3c;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      font-size: 13px;
+      font-family: Arial, sans-serif;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    #lookup-btn:hover:not(:disabled) { background: #1a3a6c; }
+    #lookup-btn:disabled { background: #999; cursor: not-allowed; }
+
+    #status {
+      margin-top: 6px;
+      min-height: 18px;
+      font-size: 12px;
+    }
+    #status.ok  { color: #2e7d32; }
+    #status.err { color: #c62828; }
+    #status.inf { color: #555;    }
+  </style>
+</head>
+<body>
+
+<div class="lookup-row">
+  <input  id="stand-input"
+          type="text"
+          placeholder="Enter Stand ID (e.g. 1001, 001001, or sb003)"
+          autocomplete="off"
+          spellcheck="false" />
+  <button id="lookup-btn">Confirm Stand ID</button>
+</div>
+<div id="status" class="inf"></div>
+
+<script>
+  // ── Configuration ────────────────────────────────────────────────────
+  // Replace this URL with your deployed Cloud Function URL after deployment
+  const CLOUD_FUNCTION_URL = "https://stand-id-lookup-695671942214.us-central1.run.app/lookup";
+
+  // JotForm internal field IDs (the number after "input_")
+  const FIELD_STAND_ID   = "53";
+  const FIELD_STAND_NAME = "74";
+  const FIELD_ADDRESS    = "75";
+  const FIELD_ZIP_CODE   = "76";
+
+  // ── JotForm Widget API bootstrap ─────────────────────────────────────
+  // Tells JotForm this iframe is a custom widget
+  window.JFCustomWidget = window.JFCustomWidget || {};
+
+  // Load JotForm widget SDK
+  (function() {
+    const script = document.createElement("script");
+    script.src = "https://js.jotform.com/JotFormCustomWidget.min.js";
+    script.onload = initWidget;
+    document.head.appendChild(script);
+  })();
+
+  function initWidget() {
+    JFCustomWidget.subscribe("ready", function() {
+      // Restore any previously saved value
+      const saved = JFCustomWidget.getValue();
+      if (saved) {
+        document.getElementById("stand-input").value = saved;
+      }
+    });
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────
+  const input     = document.getElementById("stand-input");
+  const btn       = document.getElementById("lookup-btn");
+  const statusEl  = document.getElementById("status");
+
+  function setStatus(msg, type) {
+    statusEl.textContent  = msg;
+    statusEl.className    = type;   // "ok" | "err" | "inf"
+  }
+
+  function setInputState(state) {
+    input.classList.remove("is-valid", "is-invalid");
+    if (state) input.classList.add(state);
+  }
+
+  // Populate a JotForm field by its input_ number
+  function fillField(fieldId, value) {
+    // Try direct DOM manipulation first (works for simple text inputs)
+    const el = window.parent.document.getElementById("input_" + fieldId);
+    if (el) {
+      el.value = value;
+      // Trigger change event so JotForm registers the new value
+      el.dispatchEvent(new Event("input",  { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
+  function clearFields() {
+    fillField(FIELD_STAND_NAME, "");
+    fillField(FIELD_ADDRESS,    "");
+    fillField(FIELD_ZIP_CODE,   "");
+  }
+
+  // ── Lookup ────────────────────────────────────────────────────────────
+  async function doLookup() {
+    const standId = input.value.trim();
+    if (!standId) {
+      setStatus("Please enter a Stand ID.", "err");
+      setInputState("is-invalid");
+      return;
+    }
+
+    btn.disabled = true;
+    setStatus("Looking up Stand ID…", "inf");
+    setInputState(null);
+    clearFields();
+
+    try {
+      const url      = `${CLOUD_FUNCTION_URL}?stand_id=${encodeURIComponent(standId)}`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.found) {
+        // Populate the JotForm fields
+        fillField(FIELD_STAND_NAME, data.stand_name);
+        fillField(FIELD_ADDRESS,    data.address);
+        fillField(FIELD_ZIP_CODE,   data.zip_code);
+
+        // Tell JotForm widget the validated value
+        if (window.JFCustomWidget && JFCustomWidget.sendSubmit) {
+          JFCustomWidget.sendSubmit({ value: standId, valid: true });
+        }
+
+        setInputState("is-valid");
+        setStatus(`✓ Stand found: ${data.stand_name}`, "ok");
+      } else {
+        setInputState("is-invalid");
+        setStatus(
+          `Stand ID "${standId}" not found. ` +
+          `Try with or without leading zeros, or use the SB number (e.g. sb003).`,
+          "err"
+        );
+        if (window.JFCustomWidget && JFCustomWidget.sendSubmit) {
+          JFCustomWidget.sendSubmit({ value: "", valid: false });
+        }
+      }
+
+    } catch (err) {
+      setInputState("is-invalid");
+      setStatus("Lookup failed — please try again or contact support.", "err");
+      console.error("Stand ID lookup error:", err);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ── Event listeners ───────────────────────────────────────────────────
+  btn.addEventListener("click", doLookup);
+
+  // Allow Enter key to trigger lookup
+  input.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") doLookup();
+  });
+
+  // Clear validation state when user starts retyping
+  input.addEventListener("input", function() {
+    setInputState(null);
+    setStatus("", "inf");
+  });
+</script>
+</body>
+</html>
