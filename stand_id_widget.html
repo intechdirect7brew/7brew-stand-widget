@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>7-Brew Stand ID Lookup</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      background: transparent;
+      padding: 4px 0;
+    }
+
+    .lookup-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    #stand-input {
+      flex: 1;
+      height: 36px;
+      padding: 0 10px;
+      border: 1px solid #b8b8b8;
+      border-radius: 3px;
+      font-size: 14px;
+      font-family: Arial, sans-serif;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    #stand-input:focus { border-color: #0075e2; }
+    #stand-input.is-valid   { border-color: #2e7d32; background: #f6fff6; }
+    #stand-input.is-invalid { border-color: #c62828; background: #fff6f6; }
+
+    #lookup-btn {
+      height: 36px;
+      padding: 0 16px;
+      background: #0a1f3c;
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      font-size: 13px;
+      font-family: Arial, sans-serif;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    #lookup-btn:hover:not(:disabled) { background: #1a3a6c; }
+    #lookup-btn:disabled { background: #999; cursor: not-allowed; }
+
+    #status {
+      margin-top: 6px;
+      min-height: 16px;
+      font-size: 12px;
+    }
+    #status.ok  { color: #2e7d32; }
+    #status.err { color: #c62828; }
+    #status.inf { color: #555;    }
+
+    /* Stand info card — shown after successful lookup */
+    #stand-info {
+      display: none;
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: #f0f7ff;
+      border: 1px solid #b3d4f5;
+      border-radius: 4px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    #stand-info.visible { display: block; }
+
+    #stand-info .info-label {
+      font-weight: bold;
+      color: #0a1f3c;
+      min-width: 90px;
+      display: inline-block;
+    }
+    #stand-info .info-row {
+      margin-bottom: 2px;
+    }
+    #stand-info .confirmed-badge {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 2px 8px;
+      background: #2e7d32;
+      color: #fff;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 0.3px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="lookup-row">
+  <input  id="stand-input"
+          type="text"
+          placeholder="Enter Stand ID (e.g. 1001, 001001, or sb003)"
+          autocomplete="off"
+          spellcheck="false" />
+  <button id="lookup-btn">Confirm Stand ID</button>
+</div>
+<div id="status" class="inf"></div>
+
+<div id="stand-info">
+  <div class="confirmed-badge">&#10003; Stand Confirmed</div>
+  <div class="info-row"><span class="info-label">Stand Name:</span> <span id="info-name"></span></div>
+  <div class="info-row"><span class="info-label">Address:</span>    <span id="info-address"></span></div>
+  <div class="info-row"><span class="info-label">Zip Code:</span>   <span id="info-zip"></span></div>
+</div>
+
+<script>
+  const CLOUD_FUNCTION_URL = "https://stand-id-lookup-695671942214.us-central1.run.app/lookup";
+
+  const input     = document.getElementById("stand-input");
+  const btn       = document.getElementById("lookup-btn");
+  const statusEl  = document.getElementById("status");
+  const infoCard  = document.getElementById("stand-info");
+  const infoName  = document.getElementById("info-name");
+  const infoAddr  = document.getElementById("info-address");
+  const infoZip   = document.getElementById("info-zip");
+
+  function setStatus(msg, type) {
+    statusEl.textContent = msg;
+    statusEl.className   = type;
+  }
+
+  function setInputState(state) {
+    input.classList.remove("is-valid", "is-invalid");
+    if (state) input.classList.add(state);
+  }
+
+  function showStandInfo(standName, address, zipCode) {
+    infoName.textContent = standName;
+    infoAddr.textContent = address;
+    infoZip.textContent  = zipCode;
+    infoCard.classList.add("visible");
+  }
+
+  function hideStandInfo() {
+    infoCard.classList.remove("visible");
+    infoName.textContent = "";
+    infoAddr.textContent = "";
+    infoZip.textContent  = "";
+  }
+
+  async function doLookup() {
+    const standId = input.value.trim();
+    if (!standId) {
+      setStatus("Please enter a Stand ID.", "err");
+      setInputState("is-invalid");
+      hideStandInfo();
+      return;
+    }
+
+    btn.disabled = true;
+    setStatus("Looking up Stand ID\u2026", "inf");
+    setInputState(null);
+    hideStandInfo();
+
+    try {
+      const url      = `${CLOUD_FUNCTION_URL}?stand_id=${encodeURIComponent(standId)}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+
+      if (data.found) {
+        showStandInfo(data.stand_name, data.address, data.zip_code);
+        setInputState("is-valid");
+        setStatus("", "inf");
+      } else {
+        setInputState("is-invalid");
+        hideStandInfo();
+        setStatus(
+          'Stand ID "' + standId + '" not found. ' +
+          'Try with or without leading zeros, or use the SB number (e.g. sb003).',
+          "err"
+        );
+      }
+
+    } catch (err) {
+      setInputState("is-invalid");
+      hideStandInfo();
+      setStatus("Lookup failed \u2014 please try again or contact support.", "err");
+      console.error("Stand ID lookup error:", err);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  btn.addEventListener("click", doLookup);
+
+  input.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") doLookup();
+  });
+
+  input.addEventListener("input", function() {
+    setInputState(null);
+    setStatus("", "inf");
+    hideStandInfo();
+  });
+</script>
+</body>
+</html>
